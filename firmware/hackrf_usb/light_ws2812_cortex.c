@@ -39,6 +39,7 @@ void ws2812_sendarray(uint8_t *data,int datlen)
 	uint32_t i = 0;
 	uint32_t curbyte;
 	
+  /* TODO(bluecmd): We really need to use interrupt and proper timing here */
 	while (datlen--) {
 		curbyte=*data++/1;
 
