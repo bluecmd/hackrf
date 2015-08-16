@@ -10,9 +10,7 @@
  * the Free Software Foundation; either version 2, or (at your option)
  * any later version.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * This program is distributed in the hope that it will be useful, * but WITHOUT ANY WARRANTY; without even the implied warranty of * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
@@ -695,4 +693,16 @@ void enable_rf_power(void) {
 void disable_rf_power(void) {
 	gpio_clear(PORT_VAA_ENABLE, PIN_VAA_ENABLE);
 }
+
+void ssp_clock_init(void) {
+	/* set DIV C to 40.8 MHz */
+	CGU_IDIVC_CTRL= CGU_IDIVC_CTRL_CLK_SEL(CGU_SRC_PLL1)
+		| CGU_IDIVC_CTRL_AUTOBLOCK(1) 
+		| CGU_IDIVC_CTRL_IDIV(5-1)
+		| CGU_IDIVC_CTRL_PD(0)
+		;
+
+	/* use DIV C as SSP1 base clock */
+	CGU_BASE_SSP1_CLK = (CGU_BASE_SSP1_CLK_CLK_SEL(CGU_SRC_IDIVC) | CGU_BASE_SSP1_CLK_AUTOBLOCK(1));
+};
 #endif

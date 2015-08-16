@@ -33,6 +33,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+void new_freq(const uint64_t freq);
+
 usb_request_status_t usb_vendor_request_write_max2837(
 	usb_endpoint_t* const endpoint,
 	const usb_transfer_stage_t stage

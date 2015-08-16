@@ -87,6 +87,7 @@ usb_request_status_t usb_vendor_request_set_freq(
 		if( set_freq(freq) ) 
 		{
 			usb_transfer_schedule_ack(endpoint->in);
+      new_freq(freq);
 			return USB_REQUEST_STATUS_OK;
 		}
 		return USB_REQUEST_STATUS_STALL;
@@ -216,6 +217,7 @@ usb_request_status_t usb_vendor_request_set_freq_explicit(
 		if (set_freq_explicit(explicit_params.if_freq_hz,
 				explicit_params.lo_freq_hz, explicit_params.path)) {
 			usb_transfer_schedule_ack(endpoint->in);
+      new_freq(explicit_params.if_freq_hz);
 			return USB_REQUEST_STATUS_OK;
 		}
 		return USB_REQUEST_STATUS_STALL;

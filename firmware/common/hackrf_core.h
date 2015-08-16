@@ -468,6 +468,7 @@ bool baseband_filter_bandwidth_set(const uint32_t bandwidth_hz);
 #if (defined HACKRF_ONE || defined RAD1O)
 void enable_rf_power(void);
 void disable_rf_power(void);
+void ssp_clock_init(void);
 #endif
 
 #ifdef __cplusplus

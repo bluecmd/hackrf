@@ -42,6 +42,7 @@ set(SRC_M4
 	usb_api_register.c
 	usb_api_spiflash.c
 	usb_api_transceiver.c
+  light_ws2812_cortex.c
 	"${PATH_HACKRF_FIRMWARE_COMMON}/usb_queue.c"
 	"${PATH_HACKRF_FIRMWARE_COMMON}/fault_handler.c"
 	"${PATH_HACKRF_FIRMWARE_COMMON}/w25q80bv.c"
@@ -50,6 +51,34 @@ set(SRC_M4
 	"${PATH_HACKRF_FIRMWARE_COMMON}/xapp058/micro.c"
 	"${PATH_HACKRF_FIRMWARE_COMMON}/xapp058/ports.c"
 	"${PATH_HACKRF_FIRMWARE_COMMON}/rom_iap.c"
+  ../../../r0ketlib/display.o
+  ../../../r0ketlib/render.o
+  ../../../r0ketlib/fonts/smallfonts.o
+  ../../../r0ketlib/fonts/orbitron14.o
+  ../../../r0ketlib/fonts/ubuntu18.o
+  ../../../r0ketlib/decoder.o
+  ../../../r0ketlib/print.o
+  ../../../r0ketlib/itoa.o
+  ../../../r0ketlib/keyin.o
+  ../../../r0ketlib/menu.o
+  ../../../rad1olib/spi-flash.o
+  ../../../rad1olib/assert.o
+  ../../../rad1olib/systick.o
+  ../../../fatfs/diskio.o
+  ../../../fatfs/ff.o
+  ../../../r0ketlib/select.o
+  ../../../r0ketlib/idle.o
+  ../../../r0ketlib/fs_util.o
+  ../../../r0ketlib/execute.o
+  ../../../r0ketlib/config.o
+  ../../../r0ketlib/stringin.o
+  ../../../r0ketlib/colorin.o
+  ../../../r0ketlib/random.o
+  ../../../r0ketlib/image.o
+  ../../../r0ketlib/night.o
+  ../../../rad1olib/battery.o
 )
+
+include_directories(../../../)
 
 DeclareTargets()

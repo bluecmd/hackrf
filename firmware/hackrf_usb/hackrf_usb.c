@@ -21,11 +21,23 @@
  */
 
 #include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <libopencm3/cm3/vector.h>
 
 #include <libopencm3/lpc43xx/gpio.h>
+#include <libopencm3/lpc43xx/scu.h>
+#include <libopencm3/lpc43xx/cgu.h>
 #include <libopencm3/lpc43xx/m4/nvic.h>
+
+#include <r0ketlib/fonts.h>
+#include <r0ketlib/display.h>
+#include <r0ketlib/fs_util.h>
+#include <r0ketlib/idle.h>
+#include <r0ketlib/render.h>
+#include <rad1olib/pins.h>
+#include <rad1olib/systick.h>
 
 #include <streaming.h>
 
@@ -47,8 +59,54 @@
 #include "sgpio_isr.h"
 #include "usb_bulk_buffer.h"
 #include "si5351c.h"
+#include "light_ws2812_cortex.h"
  
+#define WAIT_CPU_CLOCK_INIT_DELAY   (10000)
+
+uint64_t _freq = 0;
+
+uint8_t pattern[] = {
+  0,   0,   0,
+  0,   0,   0,
+  0,   0,   0,
+  0,   0,   0,
+  0,   0,   0,
+  0,   0,   0,
+  0,   0,   0,
+  0,   0,   0
+};
+
 static volatile transceiver_mode_t _transceiver_mode = TRANSCEIVER_MODE_OFF;
+
+bool blink = 0;
+void led_redraw() {
+  if (_transceiver_mode == TRANSCEIVER_MODE_TX) {
+    for (int i = 2*3; i < 7*3; i+=3) {
+      pattern[i + 0] = 0;
+      pattern[i + 1] = 255;
+      pattern[i + 2] = 0;
+    }
+  } else if (_transceiver_mode == TRANSCEIVER_MODE_RX) {
+    for (int i = 2*3; i < 7*3; i+=3) {
+      pattern[i + 0] = 255;
+      pattern[i + 1] = 255;
+      pattern[i + 2] = 255;
+    }
+  }
+  if (_transceiver_mode != TRANSCEIVER_MODE_OFF) {
+    blink = !blink;
+    if (blink) {
+      pattern[7*3 + 0] = 255;
+      pattern[7*3 + 1] = 255;
+      pattern[7*3 + 2] = 255;
+    } else {
+      pattern[7*3 + 0] = 0;
+      pattern[7*3 + 1] = 255;
+      pattern[7*3 + 2] = 0;
+    }
+  }
+  ws2812_sendarray(pattern, sizeof(pattern));
+}
 
 void set_transceiver_mode(const transceiver_mode_t new_transceiver_mode) {
 	baseband_streaming_disable();
@@ -220,14 +278,157 @@ void usb_set_descriptor_by_serial_number(void)
 	}
 }
 
+int offset = 0;
+bool direction = 0;
+volatile bool refresh_lock = 0;
+void redraw(void) {
+  if (refresh_lock) {
+    return;
+  }
+  refresh_lock = 1;
+
+  led_redraw();
+
+  if (!direction) {
+    offset += 1;
+  } else {
+    offset -= 1;
+  }
+
+	setExtFont("soviet18.f0n");
+
+  char freq[64];
+  if (_freq == 0 || _transceiver_mode == TRANSCEIVER_MODE_OFF) {
+    strcpy(freq, "OFF");
+  } else {
+    sprintf(freq, "%llu.%llu MHz", _freq/1000000, (_freq/10000) % 10);
+  }
+
+  int freq_width = DoString(0, 0, freq);
+  int nick_width = DoString(0, 0, "blueCmd");
+
+	lcdFill(0xff);
+
+  {
+    int dx = (RESX-nick_width)/2;
+    if(dx < 0)
+      dx = 0;
+    int dy = (RESY-getFontHeight())/3;
+
+    if (dx + nick_width + offset + 1 > RESX) {
+      direction = !direction;
+    } else if (dx + offset - 1 < 0) {
+      direction = !direction;
+    }
+
+    setTextColor(0xff, 0x00);
+	  DoString(dx + offset, dy, "blueCmd");
+  }
+  {
+    int dx = (RESX-freq_width)/2;
+    if(dx < 0)
+      dx = 0;
+    int dy = (RESY-getFontHeight())/3 * 2;
+
+    setTextColor(0xff, 0x00);
+	  DoString(dx, dy, freq);
+  }
+	lcdDisplay();
+  refresh_lock = 0;
+}
+
+void sys_tick_handler(void){
+	incTimer();
+  if ((_timectr & 0x3ff) == 0) {
+    redraw();
+  }
+  if ((_timectr & 0x3ff) == 0) {
+    ON(LED4);
+  }
+  if ((_timectr & 0x3ff) == 512) {
+    OFF(LED4);
+  }
+}
+
+void cpu_set_freq(void) {
+  /* initialisation similar to UM10503 v1.9 sec. 13.2.1.1 */
+  CGU_BASE_M4_CLK = (CGU_BASE_M4_CLK_CLK_SEL(CGU_SRC_IRC) | CGU_BASE_M4_CLK_AUTOBLOCK(1));
+
+  /* Enable XTAL */
+  CGU_XTAL_OSC_CTRL &= ~(CGU_XTAL_OSC_CTRL_HF_MASK|CGU_XTAL_OSC_CTRL_ENABLE_MASK);
+  delay(WAIT_CPU_CLOCK_INIT_DELAY); /* should be 250us / 3000 cycles @ 12MhZ*/
+
+  /* Set PLL1 up for 204 MHz */
+  CGU_PLL1_CTRL= CGU_PLL1_CTRL_CLK_SEL(CGU_SRC_XTAL)
+        | CGU_PLL1_CTRL_MSEL(17-1)
+        | CGU_PLL1_CTRL_NSEL(0)
+        | CGU_PLL1_CTRL_AUTOBLOCK(1)
+        | CGU_PLL1_CTRL_PSEL(0)
+        | CGU_PLL1_CTRL_DIRECT(1)
+        | CGU_PLL1_CTRL_FBSEL(1)
+        | CGU_PLL1_CTRL_BYPASS(0)
+        | CGU_PLL1_CTRL_PD(0)
+        ;
+  /* Wait for PLL Lock */
+  while (!(CGU_PLL1_STAT & CGU_PLL1_STAT_LOCK_MASK));
+
+  /* TODO(bluecmd): see if we actually need to land on 102 MHz
+   * before going to 204 MHz as people say. */
+
+  /* set DIV B to 102 MHz */
+  CGU_IDIVB_CTRL= CGU_IDIVB_CTRL_CLK_SEL(CGU_SRC_PLL1)
+    | CGU_IDIVB_CTRL_AUTOBLOCK(1) 
+    | CGU_IDIVB_CTRL_IDIV(1)
+    | CGU_IDIVB_CTRL_PD(0)
+    ;
+
+  delay(WAIT_CPU_CLOCK_INIT_DELAY); /* should be 50us / 5100 @ 102MhZ */
+
+  /* set DIV B to 204 MHz */
+  CGU_IDIVB_CTRL= CGU_IDIVB_CTRL_CLK_SEL(CGU_SRC_PLL1)
+    | CGU_IDIVB_CTRL_AUTOBLOCK(1) 
+    | CGU_IDIVB_CTRL_IDIV(0)
+    | CGU_IDIVB_CTRL_PD(0)
+    ;
+
+  /* use DIV B as main clock */
+  /* This means, that possible speeds in MHz are:
+   * 204 102 68 51 40.8 34 29.14 25.5 22.66 20.4 18.54 17 15.69 14.57 13.6 12.75
+   */
+
+  CGU_BASE_M4_CLK = (CGU_BASE_M4_CLK_CLK_SEL(CGU_SRC_IDIVB) | CGU_BASE_M4_CLK_AUTOBLOCK(1));
+
+  /* TODO(bluecmd): delay *2 since we're faster now? */
+  delay(WAIT_CPU_CLOCK_INIT_DELAY);
+}
+
+void new_freq(const uint64_t freq) {
+  _freq = freq;
+}
+
 int main(void) {
 	pin_setup();
 	enable_1v8_power();
+
 #if (defined HACKRF_ONE || defined RAD1O)
 	enable_rf_power();
 	delay(1000000);
 #endif
 	cpu_clock_init();
+  // TODO(bluecmd): figure out why ws2812 fails @ 204 MHz
+  cpu_set_freq();
+  
+  ssp_clock_init();
+	systickInit();
+  nvic_set_priority(NVIC_SYSTICK_IRQ, 0xFF);
+
+	SETUPgout(LED4);
+  SETUPgout(RGB_LED);
+
+	fsInit(); 
+	lcdInit();
+
+  lcdSetContrast(58);
 
 	usb_set_descriptor_by_serial_number();
 
@@ -248,16 +449,16 @@ int main(void) {
 
 	usb_run(&usb_device);
 	
-
 	ssp1_init();
 
 	rf_path_init();
 
 	unsigned int phase = 0;
-	while(true) {
+  while(true) {
 		// Check whether we need to initiate a CPLD update
 		if (start_cpld_update)
 			cpld_update();
+
 
 		// Set up IN transfer of buffer 0.
 		if ( usb_bulk_buffer_offset >= 16384
