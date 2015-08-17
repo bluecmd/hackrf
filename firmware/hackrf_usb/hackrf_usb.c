@@ -23,6 +23,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include <libopencm3/cm3/vector.h>
 
@@ -415,6 +416,39 @@ void cpu_set_freq(void) {
 void new_freq(const uint64_t freq) {
   _freq = freq;
 }
+/* Stolen from GNUradio */
+#define WORDBITS 32
+#define NBITS 10
+static const float s_sine_table[1 << NBITS][2] = {
+  #include "sine_table.h"
+};
+
+static const float PI = 3.14159265358979323846;
+static const float TWO_TO_THE_31 = 2147483648.0;
+
+
+static int32_t
+  float_to_fixed(float x)
+{
+  // Fold x into -PI to PI.
+  int d = (int)floor(x/2/PI+0.5);
+  x -= d*2*PI;
+  // And convert to an integer.
+  return (int32_t) ((float) x * TWO_TO_THE_31 / PI);
+}
+
+static void fixed_sincos(int32_t x, float *s, float *c)
+{
+  uint32_t ux = x;
+  int sin_index = ux >> (WORDBITS - NBITS);
+  *s = s_sine_table[sin_index][0] * (ux >> 1) + s_sine_table[sin_index][1];
+
+  ux = x + 0x40000000;
+  int cos_index = ux >> (WORDBITS - NBITS);
+  *c = s_sine_table[cos_index][0] * (ux >> 1) + s_sine_table[cos_index][1];
+
+  return;
+}
 
 void prime_tx(void) {
 
@@ -427,13 +461,51 @@ void prime_tx(void) {
   max2837_set_txvga_gain(47);
   rf_path_set_antenna(1);
 
+  baseband_filter_bandwidth_set(6000000);
+
 #if 0
-#include "short.h"
-  memcpy(usb_bulk_buffer, short_dat,
-      min(short_dat_len, sizeof(usb_bulk_buffer)));
+  readFile("radio1.dat", (char*)usb_bulk_buffer, 4096);
+  readFile("radio2.dat", (char*)usb_bulk_buffer+4096, 4096);
+  readFile("radio3.dat", (char*)usb_bulk_buffer+8192, 4096);
+  readFile("radio4.dat", (char*)usb_bulk_buffer+12288, 4096);
+  readFile("radio5.dat", (char*)usb_bulk_buffer+16384, 4096);
+  readFile("radio6.dat", (char*)usb_bulk_buffer+20480, 4096);
+  readFile("radio7.dat", (char*)usb_bulk_buffer+24576, 4096);
+  readFile("radio8.dat", (char*)usb_bulk_buffer+28672, 4096);
 #endif
 
   set_transceiver_mode(TRANSCEIVER_MODE_TX, 0);
+
+  /* TODO(bluecmd):
+     Improve the clocking interupts so we can construct
+     a 44.1 kHz waveform or something like that.
+     Then we should be able to do the following easier.
+  */
+  int offset = 0;
+  float d_phase = 0.0;
+  while(1) {
+    uint8_t* di = (uint8_t*)&usb_bulk_buffer[offset];
+    uint8_t* dq = (uint8_t*)&usb_bulk_buffer[offset + 1];
+
+    double signal = sin((double)_timectr / 1000.0 * 2.0 * 3.141593);
+    double d_sens = 2.0 * PI * 75000 / (44100 * 4);
+
+    d_phase = d_phase + d_sens * signal;
+
+#define F_PI ((float)(M_PI))
+    d_phase  = fmod(d_phase + F_PI, 2.0f * F_PI) - F_PI;
+
+    float oi, oq;
+    int32_t angle = float_to_fixed (d_phase);
+    fixed_sincos(angle, &oq, &oi);
+
+    *di = oi * 255;
+    *dq = oq * 255;
+
+    offset = (offset + 2) & usb_bulk_buffer_mask;
+    delayms(1);
+  }
+
 }
 
 int main(void) {
@@ -445,7 +517,6 @@ int main(void) {
   delay(1000000);
 #endif
   cpu_clock_init();
-  // TODO(bluecmd): figure out why ws2812 fails @ 204 MHz
   cpu_set_freq();
   
   ssp_clock_init();
@@ -484,6 +555,8 @@ int main(void) {
 
   rf_path_init();
 
+  delayms(1000);
+
   unsigned int phase = 0;
   while(true) {
     int ret = 0;
@@ -498,7 +571,19 @@ int main(void) {
           prime_tx();
           break;
         case BTN_DOWN:
-          set_transceiver_mode(TRANSCEIVER_MODE_OFF, 0);
+          if (_transceiver_mode != TRANSCEIVER_MODE_OFF) {
+            set_transceiver_mode(TRANSCEIVER_MODE_OFF, 0);
+#if 0
+            writeFile("radio1.dat", (char*)usb_bulk_buffer, 4096);
+            writeFile("radio2.dat", (char*)usb_bulk_buffer+4096, 4096);
+            writeFile("radio3.dat", (char*)usb_bulk_buffer+8192, 4096);
+            writeFile("radio4.dat", (char*)usb_bulk_buffer+12288, 4096);
+            writeFile("radio5.dat", (char*)usb_bulk_buffer+16384, 4096);
+            writeFile("radio6.dat", (char*)usb_bulk_buffer+20480, 4096);
+            writeFile("radio7.dat", (char*)usb_bulk_buffer+24576, 4096);
+            writeFile("radio8.dat", (char*)usb_bulk_buffer+28672, 4096);
+#endif
+          }
           break;
       }
 
